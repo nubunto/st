@@ -25,11 +25,14 @@ func main() {
 		cli.StringFlag{
 			Name:  "file",
 			Usage: "The name of the generated file.",
-			Value: "foo.go",
+			Value: "auto_generated_st_type.go",
 		},
 	}
 	app.Action = func(c *cli.Context) {
 		pkg := c.Args().Get(0)
+		if pkg == "" {
+			log.Fatal("no package name specified -- aborting")
+		}
 		typeName := c.String("type")
 		fieldsStr := c.String("fields")
 		fieldsSplit := strings.Split(fieldsStr, " ")

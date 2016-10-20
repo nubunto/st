@@ -2,7 +2,7 @@ package st
 
 import (
 	"bytes"
-	"io"
+	"go/format"
 	"io/ioutil"
 	"os"
 	"os/exec"
@@ -49,38 +49,75 @@ type Info struct {
 	Fields     Fields
 }
 
+func (in Info) filepath() string {
+	return filepath.Join(".", in.PkgName, in.Filename)
+}
+
 type Fields []Field
 type Field struct {
 	Name, Type string
 }
 
-func Generate(in Info) error {
-	b := new(bytes.Buffer)
-	t, err := template.New("st").Parse(mutableTemplate)
-	if err != nil {
-		return err
-	}
-	if err := t.Execute(b, in); err != nil {
-		return err
-	}
-	if err := createFileAndFmt(in, b); err != nil {
-		return err
-	}
-	return nil
+type generator struct {
+	b   *bytes.Buffer
+	err error
 }
 
-func createFileAndFmt(in Info, contents io.Reader) error {
-	if err := os.Mkdir(in.PkgName, os.ModeDir|os.ModePerm); err != nil {
-		return err
+func Generate(in Info) error {
+	s := &generator{b: new(bytes.Buffer)}
+	s.template(in)
+	s.removeExistingFile(in)
+	s.createPkgDirectory(in)
+	s.formatSourceContents()
+	s.writeFile(in)
+	s.findImportsIfPossible(in)
+	return s.err
+}
+
+func (s *generator) removeExistingFile(in Info) {
+	if s.err == nil {
+		if err := os.Remove(in.filepath()); !os.IsNotExist(err) {
+			s.err = err
+		}
 	}
-	cmd := exec.Command("goimports")
-	cmd.Stdin = contents
-	out, err := cmd.CombinedOutput()
+}
+
+func (s *generator) createPkgDirectory(in Info) {
+	if s.err == nil {
+		if err := os.Mkdir(in.PkgName, os.ModeDir|os.ModePerm); !os.IsExist(err) {
+			s.err = err
+		}
+	}
+}
+
+func (s *generator) formatSourceContents() {
+	if s.err == nil {
+		var out []byte
+		out, s.err = format.Source(s.b.Bytes())
+		s.b = bytes.NewBuffer(out)
+	}
+}
+
+func (s *generator) writeFile(in Info) {
+	if s.err == nil {
+		s.err = ioutil.WriteFile(in.filepath(), s.b.Bytes(), 0666)
+	}
+}
+
+func (s *generator) findImportsIfPossible(in Info) {
+	if s.err == nil {
+		cmd := exec.Command("goimports", "-w", in.filepath())
+		_, err := cmd.CombinedOutput()
+		s.err = err
+	}
+}
+
+func (s *generator) template(in Info) {
+	t, err := template.New("st").Parse(mutableTemplate)
 	if err != nil {
-		return err
+		s.err = err
 	}
-	if err := ioutil.WriteFile(filepath.Join(in.PkgName, in.Filename), out, 0666); err != nil {
-		return err
+	if err := t.Execute(s.b, in); err != nil {
+		s.err = err
 	}
-	return nil
 }
